@@ -1,0 +1,39 @@
+# Ignore everything by default
+*
+
+# But not these files...
+!.gitignore
+!README.md
+!package.json
+!package-lock.json
+
+# Track backend files
+!backend/
+!backend/server.js
+!backend/package.json
+!backend/package-lock.json
+backend/node_modules/
+backend/.env
+backend/dist/
+backend/coverage/
+
+# Track frontend files
+!frontend/
+!frontend/src/
+!frontend/public/
+!frontend/package.json
+!frontend/package-lock.json
+frontend/node_modules/
+frontend/build/
+frontend/coverage/
+frontend/.env*
+
+# Always ignore these patterns
+**/.env*
+**/*.log
+**/.DS_Store
+**/.vscode/
+**/.idea/
+**/*.swp
+**/*.swo
+**/node_modules/
