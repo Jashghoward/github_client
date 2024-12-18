@@ -8,8 +8,8 @@ app.use(cors());
 app.use(express.json());
 
 // In-memory storage for read later and favorites
-const readLater = new Set();
-const favorites = new Set();
+const readLater = new Map();
+const favorites = new Map();
 
 // GitHub API endpoint
 const GITHUB_API = 'https://api.github.com';
@@ -21,52 +21,143 @@ app.get('/api/changes', async (req, res) => {
             return res.status(400).json({ error: 'Username is required' });
         }
 
-        console.log(`Fetching events for user: ${username}, page: ${page}`);
-        
         const perPage = 15;
+        const currentPage = parseInt(page);
+        
         const headers = {
             'Authorization': `token ${process.env.GITHUB_TOKEN}`,
             'Accept': 'application/vnd.github.v3+json',
             'User-Agent': 'GitHub-Activity-Tracker'
         };
 
-        // Get user's events directly from GitHub API
+        try {
+            // First check if user exists
+            await axios.get(`${GITHUB_API}/users/${username}`, { headers });
+        } catch (error) {
+            // If user doesn't exist, return empty results instead of error
+            return res.json({
+                events: [],
+                pagination: {
+                    currentPage: 1,
+                    totalPages: 0,
+                    hasNextPage: false,
+                    hasPreviousPage: false,
+                    totalItems: 0,
+                    itemsPerPage: perPage
+                }
+            });
+        }
+
+        // Fetch events for the current page directly from GitHub API
         const response = await axios.get(`${GITHUB_API}/users/${username}/events`, {
             headers,
             params: {
                 per_page: perPage,
-                page: page
+                page: currentPage
             }
         });
 
-        console.log('Events received:', response.data.map(event => event.type));
+        // Parse the Link header to get pagination info
+        const linkHeader = response.headers.link || '';
+        const links = linkHeader.split(',').reduce((acc, link) => {
+            const match = link.match(/<([^>]+)>;\s*rel="([^"]+)"/);
+            if (match) {
+                acc[match[2]] = match[1];
+            }
+            return acc;
+        }, {});
+
+        // Calculate total pages from the last link
+        let totalPages = currentPage;
+        if (links.last) {
+            const lastPageMatch = links.last.match(/[?&]page=(\d+)/);
+            if (lastPageMatch) {
+                totalPages = parseInt(lastPageMatch[1]);
+            }
+        }
 
         const formattedEvents = response.data.map(event => ({
             id: event.id,
             type: event.type,
             repo: event.repo,
             created_at: event.created_at,
+            details: formatEventDetails(event),
             isReadLater: readLater.has(event.id),
-            isFavorite: favorites.has(event.id),
-            details: formatEventDetails(event)
+            isFavorite: favorites.has(event.id)
         }));
-
-        // Check if there are more pages
-        const hasMore = response.data.length === perPage;
 
         res.json({
             events: formattedEvents,
             pagination: {
-                page: parseInt(page),
-                hasMore,
-                totalEvents: formattedEvents.length
+                currentPage,
+                totalPages,
+                hasNextPage: Boolean(links.next),
+                hasPreviousPage: Boolean(links.prev),
+                totalItems: totalPages * perPage,
+                itemsPerPage: perPage
             }
         });
 
     } catch (error) {
-        console.error('Error details:', error.response?.data || error.message);
-        res.status(500).json({ error: 'Failed to fetch changes' });
+        // Return empty results for any other errors
+        res.json({
+            events: [],
+            pagination: {
+                currentPage: 1,
+                totalPages: 0,
+                hasNextPage: false,
+                hasPreviousPage: false,
+                totalItems: 0,
+                itemsPerPage: 15
+            }
+        });
     }
+});
+
+// Get read later items
+app.get('/api/read-later', (req, res) => {
+    const items = Array.from(readLater.values());
+    res.json(items);
+});
+
+// Add to read later
+app.post('/api/read-later', (req, res) => {
+    const activity = req.body;
+    if (!activity || !activity.id) {
+        return res.status(400).json({ error: 'Invalid activity data' });
+    }
+    readLater.set(activity.id, activity);
+    res.json({ success: true, activity });
+});
+
+// Remove from read later
+app.delete('/api/read-later/:id', (req, res) => {
+    const { id } = req.params;
+    readLater.delete(id);
+    res.json({ success: true });
+});
+
+// Get favorites
+app.get('/api/favorites', (req, res) => {
+    const items = Array.from(favorites.values());
+    res.json(items);
+});
+
+// Add to favorites
+app.post('/api/favorites', (req, res) => {
+    const activity = req.body;
+    if (!activity || !activity.id) {
+        return res.status(400).json({ error: 'Invalid activity data' });
+    }
+    favorites.set(activity.id, activity);
+    res.json({ success: true, activity });
+});
+
+// Remove from favorites
+app.delete('/api/favorites/:id', (req, res) => {
+    const { id } = req.params;
+    favorites.delete(id);
+    res.json({ success: true });
 });
 
 function formatEventDetails(event) {
@@ -122,22 +213,28 @@ function formatEventDetails(event) {
                 forkee: event.payload.forkee?.full_name
             };
 
+        case 'DeleteEvent':
+            return {
+                refType: event.payload.ref_type,
+                ref: event.payload.ref
+            };
+
+        case 'PublicEvent':
+            return {
+                repository: event.repo.name
+            };
+
+        case 'ReleaseEvent':
+            return {
+                action: event.payload.action,
+                releaseName: event.payload.release?.name,
+                tagName: event.payload.release?.tag_name
+            };
+
         default:
             return event.payload;
     }
 }
-
-app.post('/api/read-later', (req, res) => {
-    const { id } = req.body;
-    readLater.add(id);
-    res.json({ success: true });
-});
-
-app.post('/api/favourites', (req, res) => {
-    const { id } = req.body;
-    favorites.add(id);
-    res.json({ success: true });
-});
 
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => {
