@@ -14,6 +14,76 @@ const favorites = new Map();
 // GitHub API endpoint
 const GITHUB_API = 'https://api.github.com';
 
+// Event formatters for different event types
+const EVENT_FORMATTERS = {
+  PushEvent: (event) => ({
+    commits: event.payload.commits?.map(commit => ({
+      message: commit.message,
+      sha: commit.sha.substring(0, 7)
+    })) || [],
+    branch: event.payload.ref?.replace('refs/heads/', ''),
+    commitCount: event.payload.size || 0
+  }),
+
+  CreateEvent: (event) => ({
+    refType: event.payload.ref_type,
+    ref: event.payload.ref,
+    description: event.payload.description
+  }),
+
+  PullRequestEvent: (event) => ({
+    action: event.payload.action,
+    title: event.payload.pull_request?.title,
+    number: event.payload.pull_request?.number,
+    state: event.payload.pull_request?.state
+  }),
+
+  IssuesEvent: (event) => ({
+    action: event.payload.action,
+    title: event.payload.issue?.title,
+    number: event.payload.issue?.number,
+    state: event.payload.issue?.state
+  }),
+
+  IssueCommentEvent: (event) => ({
+    action: event.payload.action,
+    issueTitle: event.payload.issue?.title,
+    issueNumber: event.payload.issue?.number,
+    commentBody: event.payload.comment?.body?.substring(0, 100) + '...'
+  }),
+
+  WatchEvent: (event) => ({
+    action: event.payload.action
+  }),
+
+  ForkEvent: (event) => ({
+    forkee: event.payload.forkee?.full_name
+  }),
+
+  DeleteEvent: (event) => ({
+    refType: event.payload.ref_type,
+    ref: event.payload.ref
+  }),
+
+  PublicEvent: () => ({}),
+
+  ReleaseEvent: (event) => ({
+    action: event.payload.action,
+    releaseName: event.payload.release?.name,
+    tagName: event.payload.release?.tag_name
+  })
+};
+
+/**
+ * Formats the details of a GitHub event based on its type
+ * @param {Object} event - The GitHub event to format
+ * @returns {Object} Formatted event details
+ */
+function formatEventDetails(event) {
+  const formatter = EVENT_FORMATTERS[event.type];
+  return formatter ? formatter(event) : {};
+}
+
 app.get('/api/changes', async (req, res) => {
     try {
         const { username, page = 1 } = req.query;
@@ -159,82 +229,6 @@ app.delete('/api/favorites/:id', (req, res) => {
     favorites.delete(id);
     res.json({ success: true });
 });
-
-function formatEventDetails(event) {
-    switch (event.type) {
-        case 'PushEvent':
-            return {
-                commits: event.payload.commits?.map(commit => ({
-                    message: commit.message,
-                    sha: commit.sha.substring(0, 7)
-                })) || [],
-                branch: event.payload.ref?.replace('refs/heads/', ''),
-                commitCount: event.payload.size || 0
-            };
-
-        case 'CreateEvent':
-            return {
-                refType: event.payload.ref_type,
-                ref: event.payload.ref,
-                description: event.payload.description
-            };
-
-        case 'PullRequestEvent':
-            return {
-                action: event.payload.action,
-                title: event.payload.pull_request?.title,
-                number: event.payload.pull_request?.number,
-                state: event.payload.pull_request?.state
-            };
-
-        case 'IssuesEvent':
-            return {
-                action: event.payload.action,
-                title: event.payload.issue?.title,
-                number: event.payload.issue?.number,
-                state: event.payload.issue?.state
-            };
-
-        case 'IssueCommentEvent':
-            return {
-                action: event.payload.action,
-                issueTitle: event.payload.issue?.title,
-                issueNumber: event.payload.issue?.number,
-                commentBody: event.payload.comment?.body?.substring(0, 100) + '...'
-            };
-
-        case 'WatchEvent':
-            return {
-                action: event.payload.action
-            };
-
-        case 'ForkEvent':
-            return {
-                forkee: event.payload.forkee?.full_name
-            };
-
-        case 'DeleteEvent':
-            return {
-                refType: event.payload.ref_type,
-                ref: event.payload.ref
-            };
-
-        case 'PublicEvent':
-            return {
-                repository: event.repo.name
-            };
-
-        case 'ReleaseEvent':
-            return {
-                action: event.payload.action,
-                releaseName: event.payload.release?.name,
-                tagName: event.payload.release?.tag_name
-            };
-
-        default:
-            return event.payload;
-    }
-}
 
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => {
